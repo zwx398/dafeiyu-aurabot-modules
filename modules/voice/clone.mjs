@@ -1,4 +1,4 @@
-﻿// 用本机 Breeze TTS 2 合成大肥鱼的声音（音色 tt_feiyu3）。
+// 用本机 Breeze TTS 2 合成大肥鱼的声音（音色 tt_feiyu3）。
 // 目标：任何一句话念出来都像人，而不是靠给某几句打补丁。
 //
 // 三层：
@@ -12,6 +12,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { styleFor } from './backend.mjs'
+import { resolveVoicePaths } from './paths.mjs'
 
 // 克隆音色的底座：只写「怎么说」，绝不写「声音长什么样」。
 // 引擎文档说 instruction 在克隆场景是「delivery direction」；一旦写进「音调偏高」这种音色描述，
@@ -27,14 +28,17 @@ export const STYLES = {
   serious: { label: '认真交代', tail: '稳一点。', tag: '', cfgScale: 1.9, rate: 0.33 },
 }
 
+// 路径自动探测：配置里给的 > 环境变量 > 自动找（见 paths.mjs）。换机器不用改代码。
+const PATHS = resolveVoicePaths()
+
 const DEFAULTS = {
-  cli: 'E:\\Aurobot\\data\\breeze-tts-2\\bin\\v0.1.7\\breeze-cli.exe',
-  model: 'E:\\Aurobot\\data\\breeze-tts-2\\models\\breeze-tts-2-q8_0.gguf',
-  voicesDir: 'E:\\Aurobot\\data\\breeze-tts-2\\voices',
-  ffmpeg: 'C:\\Users\\Administrator\\.dsh\\douyin-studio\\bin\\ffmpeg.exe',
-  moodPath: 'E:\\Aurobot\\data\\mood.json',
-  baselinePath: 'E:\\Aurobot\\data\\samples\\baseline.wav',
-  chatlogPath: 'E:\\Aurobot\\data\\chatlog',
+  cli: PATHS.cli,
+  model: PATHS.model,
+  voicesDir: PATHS.voicesDir,
+  ffmpeg: PATHS.ffmpeg,
+  moodPath: PATHS.moodPath,
+  baselinePath: PATHS.baselinePath,
+  chatlogPath: PATHS.chatlogPath,
   voice: 'tt_feiyu3',
   seed: 42,
   takes: 3,

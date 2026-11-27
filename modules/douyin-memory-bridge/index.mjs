@@ -4,8 +4,11 @@
 
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 
-const OUT_DIR = 'C:\\Users\\Administrator\\.dsh\\douyin-studio\\memory'
+// 视频工厂的素材目录：环境变量优先，否则按 DSH 数据目录推（默认 ~/.dsh）。
+const OUT_DIR = process.env.DAFEIYU_STUDIO_MEMORY
+  || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'douyin-studio', 'memory')
 const OUT = join(OUT_DIR, 'aurabot.json')
 
 export default {

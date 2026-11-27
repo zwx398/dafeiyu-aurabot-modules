@@ -3,6 +3,25 @@
 「大肥鱼」是跑在 Aurabot 上的 QQ / 抖音 AI 伙伴（蓝发鲸鱼耳女仆那条鱼）。
 这个仓库放的是**我自己写的 Aurabot 模块**，以及一份改过的抖音模块，用来做备份和开源。
 
+## 一句话装好（直接把下面这句丢给你的 agent）
+
+> 帮我把这个仓库的模块装进本机的 Aurabot：先跑 `install.ps1 -DryRun` 看会做什么，再正式跑一遍，
+> 然后按它列出的「缺」把依赖补齐，最后重启 Aurabot 并确认日志里有各模块的启动行。
+
+不想用 agent 就自己来（Windows）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -DryRun   # 只看会做什么
+powershell -ExecutionPolicy Bypass -File install.ps1            # 真装（自动找 Aurabot 目录）
+```
+
+`install.ps1` 会做三件事：找到 Aurabot 的 `data/modules` → 把 9 个模块拷进去（已存在的跳过）→
+检查依赖并告诉你缺什么。找不到 Aurabot 目录时用 `-ModulesDir "D:\Aurobot\data\modules"` 指一下。
+双击 `install.cmd` 也行。
+
+**前提**：本机已经装好 Aurabot（DSH 插件 `dsh-aurabot-qq`）并且它能正常收发 QQ 消息。
+这些模块不是独立程序，只是插件里的功能件。
+
 ## 模块清单
 
 | 模块 | 作用 |
@@ -32,6 +51,8 @@
 
 ## 怎么用（先看这段）
 
+（用 `install.ps1` 的话，下面「通用步骤」它会替你做，可以直接看依赖表。）
+
 **前提：先装好 Aurabot**（DSH 插件 `dsh-aurabot-qq`），并且它能正常收发 QQ 消息。
 这些模块不是独立程序，只是插件里的功能件——宿主不在，拷进去也不会动。
 
@@ -56,14 +77,18 @@
 | `douyin-memory-bridge` | `memory` 模块在跑 + 视频工厂的 memory 目录存在 |
 | `dsh-memory-bridge` | `memory` 模块在跑 + 一个能解 zstd 的 `node.exe`；第一次建议先开干跑看日志 |
 
-### 要改成自己机器的地方（路径是写死的）
+### 路径怎么配（不用改代码）
 
-- `modules/voice/clone.mjs` 里的 `DEFAULTS`：`breeze-cli.exe`、q8 模型、`voices` 目录、`ffmpeg`、
-  `mood.json`、`baseline.wav`、`chatlog` 目录——一共 7 处，全部要换成自己机器上的路径。
-- `modules/douyin-memory-bridge/index.mjs` 的 `OUT_DIR`：视频工厂的 memory 目录。
-- `dsh-memory-bridge` 的 `defaults.nodePath`：解压会话文件用的 `node.exe`（可以在面板设置里改）。
+模块会按「配置里给的 → 环境变量 → 自动探测」的顺序找自己要用的东西（见 `modules/voice/paths.mjs`），
+所以换机器**不用改代码**。自动找不到时，二选一：
 
-原文按 Windows 写的（`C:\...`、`E:\...`），换系统要自己改分隔符。
+- 设环境变量：`DAFEIYU_DATA_DIR`（Aurabot 的 data 目录）、`DAFEIYU_BREEZE_HOME`（Breeze TTS 根目录）、
+  `DAFEIYU_BREEZE_CLI` / `DAFEIYU_BREEZE_MODEL` / `DAFEIYU_VOICES_DIR` / `DAFEIYU_FFMPEG` /
+  `DAFEIYU_MOOD` / `DAFEIYU_BASELINE` / `DAFEIYU_CHATLOG` / `DAFEIYU_STUDIO_MEMORY`。
+- 或直接写进 `plugins-data/aurabot/modules-data/voice/backend.json`（优先级最高），键名同上小写：
+  `cli`、`model`、`voicesDir`、`ffmpeg`、`moodPath`、`baselinePath`、`chatlogPath`。
+
+`dsh-memory-bridge` 的解压 node 可以在面板设置里改（默认自动找一个）。
 
 ### 建议的上手顺序
 
