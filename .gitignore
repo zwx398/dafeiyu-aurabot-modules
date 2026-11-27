@@ -1,0 +1,9 @@
+.aurabot-cache/
+node_modules/
+*.rollback
+*.bak
+*.bak-*
+*.log
+logs/
+.DS_Store
+Thumbs.db

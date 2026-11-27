@@ -1,0 +1,14 @@
+{
+  "id": "douyin-memory-bridge",
+  "name": "抖音记忆桥",
+  "version": "0.1.0",
+  "description": "把大肥鱼的记忆实时同步给抖音视频工厂当素材",
+  "category": "tool",
+  "tags": ["记忆", "抖音", "桥接", "同步"],
+  "author": "大肥鱼",
+  "license": "MIT",
+  "api": 1,
+  "minPluginVersion": "1.2.0",
+  "requires": ["memory"],
+  "capabilities": ["filesystem", "plugin-internals"]
+}
