@@ -30,10 +30,45 @@
 梗百科模块只**读** DSH 梗百科插件（`dsh-memewiki`）的词库文件 `memes.db`（只读，不写不改），
 词条内容是那边的；匹配、预查、注入这些逻辑是我自己重写的，仓库里没有 `dsh-memewiki` 的代码。
 
-## 安装
+## 怎么用（先看这段）
 
-把 `modules/<模块名>` 整个目录拷到 Aurabot 的 `data/modules/` 下，重启（或在面板里启用）即可。
-模块依赖宿主注入的 `api`，接口见 Aurabot 自带的 `data/modules/API.md`。
+**前提：先装好 Aurabot**（DSH 插件 `dsh-aurabot-qq`），并且它能正常收发 QQ 消息。
+这些模块不是独立程序，只是插件里的功能件——宿主不在，拷进去也不会动。
+
+### 通用步骤
+
+1. 把 `modules/<模块名>` 整个目录拷到 Aurabot 的 `data/modules/` 下。
+2. 重启 Aurabot（或在面板「已安装」页里重载模块）。
+3. 看日志有没有这个模块的启动行。报错多半是缺依赖，对照下表。
+4. 模块的设置存在 `plugins-data/aurabot/config.json` 的 `modules.<模块 id>` 下面，面板上能改。
+
+### 每个模块还要准备什么
+
+| 模块 | 额外依赖 |
+| --- | --- |
+| `voice` | Breeze TTS 2 引擎（`breeze-cli.exe`）+ q8 权重 + `.breeze` 音色文件 + ffmpeg；缺一个就会退回系统 TTS |
+| `voice-bridge` | `voice` 模块在跑，并且 `dsh-douyin-studio`（视频工厂）在跑 |
+| `qq-memewiki` | DSH 梗百科插件 `dsh-memewiki`（只读它的 `memes.db`） |
+| `qq-group-privacy` | 无；想用自己的表情图就放 `public-stickers.json` 同款的 sha256 索引 |
+| `qq-group-self` | `memory` 模块在跑 |
+| `douyin` | 抖音网页端登录态（Edge + CDP）；**更推荐装社区原版**，这份当改动参考 |
+| `douyin-at` | `douyin` 模块在跑 |
+| `douyin-memory-bridge` | `memory` 模块在跑 + 视频工厂的 memory 目录存在 |
+| `dsh-memory-bridge` | `memory` 模块在跑 + 一个能解 zstd 的 `node.exe`；第一次建议先开干跑看日志 |
+
+### 要改成自己机器的地方（路径是写死的）
+
+- `modules/voice/clone.mjs` 里的 `DEFAULTS`：`breeze-cli.exe`、q8 模型、`voices` 目录、`ffmpeg`、
+  `mood.json`、`baseline.wav`、`chatlog` 目录——一共 7 处，全部要换成自己机器上的路径。
+- `modules/douyin-memory-bridge/index.mjs` 的 `OUT_DIR`：视频工厂的 memory 目录。
+- `dsh-memory-bridge` 的 `defaults.nodePath`：解压会话文件用的 `node.exe`（可以在面板设置里改）。
+
+原文按 Windows 写的（`C:\...`、`E:\...`），换系统要自己改分隔符。
+
+### 建议的上手顺序
+
+先 `dsh-memory-bridge`（能开干跑，只看日志不写记忆）→ `qq-memewiki`（只读词库，最安全）→
+`voice`（要引擎，最麻烦）→ 抖音那几个（要登录态）。
 
 ## 这个仓库里没有什么
 
