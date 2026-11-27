@@ -17,6 +17,19 @@
 | `modules/douyin-memory-bridge` | 把她的记忆实时同步给抖音视频工厂当素材 |
 | `modules/dsh-memory-bridge` | 把 DSH 客户端的对话写进和 QQ / 抖音同一份记忆 |
 
+## patches/ 目录
+
+除了模块，还放了对**第三方包本体**的小改动（直接改的 `node_modules`，没法按模块格式分发）：
+
+| 目录 | 目标 | 干什么 |
+| --- | --- | --- |
+| `patches/dsh-aurabot-qq` | DSH 插件 `dsh-aurabot-qq` 1.2.1 | QQ 发表情包：情绪别名表、重复窗口、同一张重复时静默换一张 |
+
+## 关于 qq-memewiki 的词库
+
+梗百科模块只**读** DSH 梗百科插件（`dsh-memewiki`）的词库文件 `memes.db`（只读，不写不改），
+词条内容是那边的；匹配、预查、注入这些逻辑是我自己重写的，仓库里没有 `dsh-memewiki` 的代码。
+
 ## 安装
 
 把 `modules/<模块名>` 整个目录拷到 Aurabot 的 `data/modules/` 下，重启（或在面板里启用）即可。
