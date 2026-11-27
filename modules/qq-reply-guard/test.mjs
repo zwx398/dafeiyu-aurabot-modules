@@ -1,7 +1,7 @@
 // 回归用例：真机踩到的那条 + 容易误伤的日常回复。
 // 跑法（仓库根目录）：node modules/qq-reply-guard/test.mjs
 
-import { 清洗 } from './index.mjs'
+import { 清洗, 改规则 } from './index.mjs'
 
 const 真机 = [
   '哦 以后改了代码都推到 GitHub',
@@ -47,4 +47,27 @@ for (const [名字, 输入, 期望] of 案例) {
   }
 }
 console.log(失败 ? `\n${失败} 条没过` : `\n${案例.length} 条全过`)
+
+// ---- 规则改写：把「一句一行越短越好」换成「每句要说完整」 ----
+const 真规则 = [
+  '【回复方式】',
+  '- 像真人打字一样，一句一行，每一行会单独发成一条消息（也可以用 ||| 隔开）；一般两三条就够，别刷屏。',
+  '- 对方明确让你发语音时，一定要把要说的话放进 <voice></voice>。',
+].join('\n')
+const 改后 = 改规则(真规则)
+const 规则用例 = [
+  ['规则里那一行被换掉', 改后.includes('每一句都要说完整'), true],
+  ['规则里不再要求「一句一行」', 改后.includes('一句一行'), false],
+  ['其它规则行原样保留', 改后.includes('对方明确让你发语音时'), true],
+  ['开头那行也保留', 改后.startsWith('【回复方式】'), true],
+  ['没有那行时不动', 改规则('【回复方式】\n- 随便聊聊就好。'), '【回复方式】\n- 随便聊聊就好。'],
+]
+for (const [名字, 实际, 期望] of 规则用例) {
+  const ok = 实际 === 期望
+  if (!ok) 失败++
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${名字}`)
+  if (!ok) console.log(`  期望：${JSON.stringify(期望)}\n  实际：${JSON.stringify(实际)}`)
+}
+
+console.log(失败 ? `\n${失败} 条没过` : `\n规则用例也全过`)
 process.exit(失败 ? 1 : 0)

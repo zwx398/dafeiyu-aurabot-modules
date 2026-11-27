@@ -150,18 +150,42 @@ export function 清洗(text) {
   return out || 原 // 全被削掉就别乱动
 }
 
+// 规则改写（2026-11-28，主人要求「一句话原本的意思不能被搞坏」）：
+// 插件自带的规则里有一行「像真人打字一样，一句一行…一般两三条就够」，它会把回复往「短」上压，
+// 真机就压出过病句：01:35 那条「QQ 头像那张是同一只想，但我在里面看它」，
+// 本意是「同一只，只是我在表情库里看它（姿势不一样）」，主谓和连接词被压掉了。
+// 这里只改这一行：保留「像真人打字、拆条发」的意思，加上「每句要说完整，宁可多打几个字」。
+const 原来那行 = /^([ \t]*(?:[-*]\s*)?)[^\n]*一句一行[^\n]*$/mu
+const 新规则 = '像真人打字一样发消息：想说的多就拆成几条、每条单独发，但每一句都要说完整——宁可多打几个字，也别为了短把主语、动词、连接词压掉。一般两三条就够，别刷屏。'
+
+export function 改规则(text) {
+  const 原 = String(text || '')
+  if (!原来那行.test(原)) return 原
+  const 后 = 原.replace(原来那行, (line, 缩进) => `${缩进}${新规则}`)
+  return 后 === 原 ? 原 : 后
+}
+
 export default {
   id: 'qq-reply-guard',
   name: '回复兜底清洗',
-  version: '1.0.0',
+  version: '1.1.0',
   api: 1,
-  description: '模型把英文自检念头打进正文、或把整段回答重抄一遍时，发出去之前自动削掉。',
+  description: '模型把英文自检念头打进正文、或把整段回答重抄一遍时，发出去之前削掉；并把「一句一行越短越好」的规则改成「每句要说完整」。',
   setup(api) {
     api.on('reply', (text, { chatId } = {}) => {
       const 原 = String(text || '')
       const 后 = 清洗(原)
       if (后 === 原) return undefined
       api.log?.info(`[reply-guard] ${chatId || '?'} 清掉一段跑偏的回复：${原.length} → ${后.length} 字`)
+      return 后
+    })
+
+    // 同步钩子：提示词变量不等异步
+    api.on('rules', (text, kind) => {
+      const 原 = String(text || '')
+      const 后 = 改规则(原)
+      if (后 === 原) return undefined
+      api.log?.debug?.(`[reply-guard] 规则（${kind || '?'}）里的「一句一行」改成「每句说完整」`)
       return 后
     })
   },
