@@ -41,6 +41,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 | `qq-memewiki` | Meme-wiki lookup before replying; no guessing when a meme is unknown |
 | `qq-group-privacy` | Group-chat privacy: blocked words, segment allow-list, voice pass-through |
 | `qq-group-self` | Self-awareness in group chats: who "she" means, what she did on other platforms |
+| `qq-reply-guard` | Reply guard: strips leaked English self-check notes and de-duplicates a re-copied answer before sending |
 | `douyin` | Douyin: comment @s, threaded replies, sticker collecting, image comments, reading comment stickers |
 | `douyin-at` | HTTP bridge for "comment on this video and really @ the owner" |
 | `douyin-memory-bridge` | Streams memory into the Douyin video factory |

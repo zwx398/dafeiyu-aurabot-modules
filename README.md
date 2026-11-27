@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Aurabot Module](https://img.shields.io/badge/Aurabot-module-6f42c1.svg)](https://github.com/aureth-labs/dsh-aurabot-qq)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#环境要求)
-[![Modules](https://img.shields.io/badge/modules-9-brightgreen.svg)](#模块清单)
+[![Modules](https://img.shields.io/badge/modules-10-brightgreen.svg)](#模块清单)
 [![Stars](https://img.shields.io/github/stars/zwx398/dafeiyu-aurabot-modules?style=social)](https://github.com/zwx398/dafeiyu-aurabot-modules)
 
 ## 这是什么
@@ -77,6 +77,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1            # 真装
 | [`qq-memewiki`](modules/qq-memewiki) | 梗百科预查：命中就接梗，不硬编出处 | `dsh-memewiki` 的词库 |
 | [`qq-group-privacy`](modules/qq-group-privacy) | 群聊隐私防护：敏感词、发送白名单、语音段放行 | 无 |
 | [`qq-group-self`](modules/qq-group-self) | 群聊里的自我认知：分清「她」是谁、知道自己在别处做过什么 | `memory` |
+| [`qq-reply-guard`](modules/qq-reply-guard) | 回复兜底清洗：模型把英文自检念头打进正文、或把整段回答重抄一遍，发出去前削掉 | 无 |
 | [`douyin`](modules/douyin) | 抖音增强：读 @、楼中楼、表情收藏、图片评论、评论区读图（基于社区 2.3.8） | 抖音登录态 |
 | [`douyin-at`](modules/douyin-at) | 抖音动作小桥：评论某条视频并真 @ 主人，做成 HTTP 接口 | `douyin` |
 | [`douyin-memory-bridge`](modules/douyin-memory-bridge) | 把记忆实时同步给抖音视频工厂当素材 | `memory` + 视频工厂 |
