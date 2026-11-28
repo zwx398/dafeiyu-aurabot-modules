@@ -345,5 +345,8 @@ export default {
     })
 
     api.log.info(`已启动（${api.settings().dryRunMode ? '干跑' : '正式写'}，每 ${api.settings().intervalSec} 秒看一次）`)
+
+    // 给别的模块用：抖音私信那几轮不经过 QQ 的 prompt 钩子，由 douyin 模块自己把这段塞进提示词
+    return { windowText: () => buildInjection(), memoryWritten: () => ((loadState().offsets && true) || false) }
   },
 }

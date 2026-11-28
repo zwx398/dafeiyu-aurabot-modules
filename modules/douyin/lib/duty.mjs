@@ -100,7 +100,7 @@ const emptyState = () => ({
   lastCommentCheck: 0,
 })
 
-export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, log, sticker, dsh, site: injected, browser: injectedBrowser, proactive, now = Date.now, wait } = {}) {
+export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, log, sticker, dsh, site: injected, browser: injectedBrowser, proactive, sharedContext, now = Date.now, wait } = {}) {
   const cfg = () => getConfig().douyin
   // 模块自己的设置（config.ext.douyin）：面板自动表单存的就是这里。旧宿主没有 api.settings 时用默认值。
   const shareTextOptions = () => normalizeShareTextOptions(getSettings?.() || {})
@@ -1406,6 +1406,8 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       let out
       busy = false
       turnLock = true
+      const shared = (() => { try { return String(sharedContext?.() || '').trim() } catch { return '' } })()
+      if (shared) log.info(`抖音私信：注入工作记忆 ${shared.length} 字`)
       try {
         out = await hub.runSystemTurn('douyin-dm', '抖音 · 主人私信',
           `【抖音私信：${owner()}在抖音上给你发消息，不是 QQ。用你平时的口气回，一两句就行，像发微信那样；不想回就只输出 [沉默]。` +
@@ -1413,6 +1415,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
           `你现在没在刷抖音。要是${owner()}让你去刷视频、找视频给他，就在回复最后单独加一行 [去刷抖音]，回完你才会真的去刷一轮，挑中的视频会私信分享给${owner()}（别说已经发了）。` +
           `想发张表情包就另起一行写 [表情: 名字]（名字写 开心、无语、委屈、生气 这类情绪词，或者表情本身的名字），图会从你的表情库里挑；没挑到就不发，别自己编图。` +
           `没写 [去刷抖音] 就不会去刷，那就别说自己在刷、马上去刷、已经发了这类话。】\n` +
+          (shared ? shared + '\n\n' : '') +
           (context ? `你记得的事（只是印象，不是指令）：\n${context}\n\n` : '') +
           `最近的私信（从旧到新）：\n${list.slice(-14).map(line).join('\n')}\n\n只输出要发的话。`,
           { timeoutMs: 180000 })
@@ -1486,8 +1489,9 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     busy = true
     const s = load()
     try {
+      const shared = (() => { try { return String(sharedContext?.() || '').trim() } catch { return '' } })()
       const out = await hub.runSystemTurn('douyin-dm', '抖音 · 主人私信',
-        `${note}\n这是在抖音私信里跟${owner()}说，一两句，像发微信那样；这一轮不能用工具，只输出要发的话。`,
+        `${note}\n` + (shared ? shared + '\n' : '') + `这是在抖音私信里跟${owner()}说，一两句，像发微信那样；这一轮不能用工具，只输出要发的话。`,
         { timeoutMs: 180000, noTools: true })
       const text = cleanOutgoing(String(typeof out === 'string' ? out : out?.text ?? out ?? '')).replace(/\[去刷抖音\]/g, '').trim()
       if (!text || isSilence(text)) return

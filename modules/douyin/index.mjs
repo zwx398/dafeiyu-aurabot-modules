@@ -61,7 +61,7 @@ export default {
         return ''
       }
     }
-    const dy = createDouyin({ getConfig: api.config, getSettings: api.settings, setOwner, hub, memory: api.lazy('memory'), log: api.log, proactive: api.proactive, sticker: stickerFile, dsh: api.dsh })
+    const dy = createDouyin({ getConfig: api.config, getSettings: api.settings, setOwner, hub, memory: api.lazy('memory'), log: api.log, proactive: api.proactive, sticker: stickerFile, dsh: api.dsh, sharedContext: () => api.use('dsh-memory-bridge')?.windowText?.() || '' })
     api.every(60_000, () => dy.tick(), '刷抖音')
     api.onDispose(() => dy.dispose())
 
