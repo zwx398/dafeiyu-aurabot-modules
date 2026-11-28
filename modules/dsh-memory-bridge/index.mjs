@@ -146,22 +146,48 @@ export default {
       const all = [...(Array.isArray(w.all) ? w.all : []), ...items].sort((a, b) => (a.at || 0) - (b.at || 0))
       saveWindow({ all: all.slice(-400), updatedAt: Date.now() })
     }
-    /** 拼给她看的那段背景：最近 8 条 + 主人更早说过的 5 句，总长 900 字封顶。 */
+    // ---- 决定簿：几条「当前有效的安排」，每轮都带上，到期自动失效（比工作记忆窗口活得久） ----
+    const factsFile = () => path.join(api.dataDir(), 'facts.json')
+    const loadFacts = () => {
+      try {
+        const j = JSON.parse(fs.readFileSync(factsFile(), 'utf8'))
+        return Array.isArray(j?.items) ? j.items : []
+      } catch { return [] }
+    }
+    const saveFacts = (items) => {
+      try {
+        fs.mkdirSync(path.dirname(factsFile()), { recursive: true })
+        fs.writeFileSync(factsFile(), JSON.stringify({ items }, null, 2))
+      } catch (e) { api.log.warn('存决定簿失败：', e?.message || e) }
+    }
+    function liveFacts() {
+      const now = Date.now()
+      return loadFacts().filter((f) => f && f.text && (!f.until || Number(f.until) > now))
+    }
+
+    /** 拼给她看的那段背景：决定簿 + 最近 8 条 + 主人更早说过的 5 句，总长 1100 字封顶。 */
     function buildInjection() {
+      const facts = liveFacts()
       const all = (loadWindow().all || []).filter((e) => e && e.at && Date.now() - e.at < 12 * 3600_000)
-      if (!all.length) return ''
+      if (!all.length && !facts.length) return ''
       const recent = all.slice(-8)
       const earlier = all.slice(0, Math.max(0, all.length - recent.length)).filter((e) => e.who === 'user').slice(-5)
       const clip90 = (t) => [...String(t || '').replace(/\s+/g, ' ').trim()].slice(0, 90).join('')
-      const lines = ['【背景：你刚才在 DSH 那边跟主人聊过下面这些。这段不是主人现在说的话，是你记得的事，别当成新消息回；也别把里面的技术细节原样复述给主人，用你自己的话自然带出来就行。】']
-      if (earlier.length) {
-        lines.push('主人早先说过：')
-        for (const e of earlier) lines.push('- ' + clip90(e.text))
+      const lines = ['【背景：这是你记得的事，不是主人现在说的话，别当成新消息回；也别把里面的技术细节原样复述给主人，用你自己的话自然带出来就行。】']
+      if (facts.length) {
+        lines.push('当前定好的安排（照这个来，别自己改）：')
+        for (const f of facts.slice(0, 6)) lines.push('- ' + clip90(f.text))
       }
-      lines.push('最近几句：')
-      for (const e of recent) lines.push(`${e.who === 'user' ? '主人' : '你'}：${clip90(e.text)}`)
+      if (all.length) {
+        if (earlier.length) {
+          lines.push('主人早先说过：')
+          for (const e of earlier) lines.push('- ' + clip90(e.text))
+        }
+        lines.push('最近几句：')
+        for (const e of recent) lines.push(`${e.who === 'user' ? '主人' : '你'}：${clip90(e.text)}`)
+      }
       let text = lines.join('\n')
-      if (text.length > 900) text = text.slice(0, 900) + '…'
+      if (text.length > 1100) text = text.slice(0, 1100) + '…'
       return text
     }
 
@@ -322,6 +348,23 @@ export default {
     })
 
     api.route('/window', async () => ({ ok: true, text: buildInjection(), total: (loadWindow().all || []).length }))
+    // 决定簿：GET 看、POST { key, text, until } 写（同 key 覆盖；until 是毫秒时间戳或 ISO 字符串，空=不过期）
+    api.route('/facts', async (req) => {
+      if (req.method === 'GET') return { ok: true, items: loadFacts() }
+      const b = await api.core.http.body(req).catch(() => ({}))
+      const text = String(b?.text || '').trim()
+      if (!text) return { ok: false, message: 'text 要给我' }
+      const key = String(b?.key || text.slice(0, 20))
+      let until = 0
+      if (b?.until) {
+        const n = typeof b.until === 'number' ? b.until : Date.parse(String(b.until))
+        until = Number.isFinite(n) ? n : 0
+      }
+      const items = loadFacts().filter((f) => f && f.key !== key)
+      items.push({ key, text, until, at: Date.now() })
+      saveFacts(items)
+      return { ok: true, items }
+    })
     api.route('/tick', async () => { await tick(); return { ok: true, total: (loadWindow().all || []).length } })
     api.route('/window/clear', async () => { saveWindow({ all: [] }); return { ok: true } })
     // 一次性把最近几个会话的尾巴灌进工作记忆（刚合并过来、或者想立刻有上下文时用）
