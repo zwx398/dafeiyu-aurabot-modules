@@ -16,6 +16,24 @@ import { normalizeMentionOptions } from './mention-settings.mjs'
 const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const between = (lo, hi) => Math.floor(lo + Math.random() * (Math.max(lo, hi) - lo + 1))
 const clip = (t, max) => [...String(t ?? '').replace(/\s+/g, ' ').trim()].slice(0, max).join('')
+
+// QQ 那套标记在抖音是发不出去的（会原样变成 "<face:呲牙>" 这种字）。
+// 出站前统一翻译：语音标签剥壳、<sticker:标签> 当抖音的 [表情: 名字]、<face:名字> 换 unicode。
+const FACE_EMOJI = {
+  呲牙: '😁', 微笑: '🙂', 笑哭: '😂', 大哭: '😭', 害羞: '☺️', 调皮: '😜', 亲亲: '😘', 白眼: '🙄',
+  捂脸: '🤦', 偷笑: '🤭', 发怒: '😡', 强: '👍', 弱: '👎', 爱心: '❤️', 心碎: '💔', 抱拳: '🙏',
+  玫瑰: '🌹', 太阳: '☀️', 月亮: '🌙', 得意: '😎', 疑问: '❓', 问号: '❓', 庆祝: '🎉', 炸弹: '💣',
+  睡: '😴', 惊讶: '😮', 撇嘴: '😕', 可怜: '🥺', 委屈: '🥺', 汗: '😅', ok: '👌', OK: '👌',
+}
+/** 把 QQ 的标记翻成抖音能发的：不认识的 <face:x> / <sticker:x> 一律别漏字。 */
+function cleanOutgoing(text) {
+  return String(text ?? '')
+    .replace(/<voice>([\s\S]*?)<\/voice>/gi, '$1')
+    .replace(/<sticker[:：]\s*([^>\n]{1,20})>/gi, '[表情: $1]')
+    .replace(/<face[:：]\s*([^>\n]{1,12})>/gi, (_, n) => FACE_EMOJI[String(n).trim()] || '')
+    .replace(/<\/?(?:voice|sticker|face|image|record)[^>]*>/gi, '')
+    .trim()
+}
 /** 评论正文开头是「@昵称」那个引用，不是她说的话；只掐掉这一个 @词，别把后面的话一起吃了。
  *  注意：通知里的 content 也可能带着正文（「@111的大肥鱼 能看到不」），所以只取开头的 @词当锚点。 */
 const stripMention = (text, mention) => {
@@ -622,6 +640,85 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     }
   }
 
+  /** 她自己主页上的作品（最新在前）。要读/回自己作品下面的评论时，先用这个拿 awemeId。 */
+  async function myWorks({ count = 6 } = {}) {
+    if (busy) return { ok: false, message: '正在刷抖音，等会儿再看' }
+    busy = true
+    const s = load()
+    try {
+      const r = await ready(s, '主人要求')
+      if (!r.ok) return r
+      const me = await site.self().catch(() => null)
+      if (!me?.secUid) return { ok: false, message: '拿不到她自己的主页（登录态掉了？）' }
+      const posts = await site.userPosts(me.secUid, { count: Math.max(1, Math.min(20, Number(count) || 6)) })
+      return {
+        ok: true,
+        nickname: me.nickname || '',
+        works: posts.map((p) => ({
+          awemeId: p.awemeId,
+          title: p.title || '',
+          url: videoLink(p.awemeId),
+          likes: p.likes,
+          comments: p.comments,
+          at: p.createdAt || 0,
+        })),
+      }
+    } catch (error) {
+      return { ok: false, message: '读她作品失败：' + error.message }
+    } finally {
+      busy = false
+      save(s)
+    }
+  }
+
+  /** 读她自己作品（默认最新一条）下的评论，带每条评论的 cid，方便接着回。 */
+  async function myComments({ awemeId = '', count = 20, withReplies = true } = {}) {
+    let id = String(awemeId || '')
+    if (!id) {
+      const w = await myWorks({ count: 1 })
+      if (!w.ok) return w
+      id = w.works?.[0]?.awemeId || ''
+      if (!id) return { ok: false, message: '她主页上还没有作品' }
+    }
+    return await readComments(videoLink(id), { count: Number(count) || 20, withReplies: withReplies !== false })
+  }
+
+  /**
+   * 在她自己作品的某条评论下面回一句（楼中楼）。默认不带 @——回陌生人的评论挂「@主人」很怪。
+   * parentCid：回的是别人的子回复时，填那条子回复所属的一级评论 cid（抖音要它才能挂对位置）。
+   */
+  async function replyMyComment({ awemeId = '', cid = '', parentCid = '', text = '', at = false } = {}) {
+    const want = String(cid || '').trim()
+    if (!/^\d+$/.test(want)) return { ok: false, message: '要回哪条评论？cid 不对' }
+    const id = String(awemeId || '')
+    if (!/^\d{15,}$/.test(id)) return { ok: false, message: '要哪条作品？awemeId 不对（先用 douyin_my_works 拿）' }
+    const say = clip(cleanOutgoing(String(text || '').trim()), 100)
+    if (!say) return { ok: false, message: '回复内容是空的' }
+    if (busy) return { ok: false, message: '正在刷抖音，等会儿再回' }
+    const s = load()
+    busy = true
+    try {
+      const r = await ready(s, '主人要求')
+      if (!r.ok) return r
+      const atInfo = at ? await ownerMention() : null
+      const parent = String(parentCid || '').trim()
+      const w = await doWrite(
+        s,
+        'comment',
+        { awemeId: id, text: say },
+        () => site.replyComment(id, want, say, parent ? { at: atInfo, replyId: parent, replyToReplyId: want } : { at: atInfo }),
+        { waitGap: true },
+      )
+      if (!w.ok) return { ok: false, message: w.message || '没回成', blocked: Boolean(w.blocked), dryRun: Boolean(w.dryRun) }
+      return { ok: true, cid: w.cid || '', dryRun: Boolean(w.dryRun), message: w.dryRun ? '试运行：没真发出去' : '回复发出去了' }
+    } catch (error) {
+      return { ok: false, message: '回复失败：' + error.message }
+    } finally {
+      busy = false
+      save(s)
+    }
+  }
+
   /** 给某条评论发一条带真 @ 主人的楼中楼回复（给工具/测试用，不走 caps）。 */
   async function replyToComment(awemeId, cid, text) {
     if (busy) return { ok: false, message: '正在刷抖音，等会儿再回' }
@@ -1178,7 +1275,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
 
   const likeVideo = (link) => act('like', link)
   async function commentVideo(link, text, opts = {}) {
-    const t = clip(text, 100)
+    const t = clip(cleanOutgoing(text), 100)
     if (!t) return { ok: false, message: '评论不能是空的' }
     // 真·@：把主人的 uid / secUid / 昵称现查一次，交给评论区接口写进 text_extra
     const at = opts?.at ? await ownerMention() : null
@@ -1318,7 +1415,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
         turnLock = false
         busy = true
       }
-      let text = typeof out === 'string' ? out : String(out?.text ?? out ?? '')
+      let text = cleanOutgoing(typeof out === 'string' ? out : String(out?.text ?? out ?? ''))
       wantBrowse = /\[去刷抖音\]/.test(text)
       text = text.replace(/\[去刷抖音\]/g, '').trim()
       // 表情标记先摘出来：和 QQ 一样写 [表情: 名字]，发完字再发图
@@ -1387,7 +1484,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       const out = await hub.runSystemTurn('douyin-dm', '抖音 · 主人私信',
         `${note}\n这是在抖音私信里跟${owner()}说，一两句，像发微信那样；这一轮不能用工具，只输出要发的话。`,
         { timeoutMs: 180000, noTools: true })
-      const text = String(typeof out === 'string' ? out : out?.text ?? out ?? '').replace(/\[去刷抖音\]/g, '').trim()
+      const text = cleanOutgoing(String(typeof out === 'string' ? out : out?.text ?? out ?? '')).replace(/\[去刷抖音\]/g, '').trim()
       if (!text || isSilence(text)) return
       await site.dms(o.uid) // 刷完浏览器停在推荐页，先回到和主人的会话
       for (const msg of text.split(/\n+|\|\|\|/).map((x) => clip(x, 300)).filter(Boolean).slice(0, 2)) {
@@ -1575,5 +1672,5 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     } finally { busy = false }
   }
 
-  return { run, browse, watch, recentVideos, shareVideo, directDm, likeVideo, commentVideo, confirmOwner, checkOwnerDms, checkCommentReplies, checkMentions, checkWorkComments, listMentions, readInbox, readComments, replyToComment, myStickers: () => site.myStickers(), pickSticker, collectSticker: (s) => site.collectSticker(s), describeSticker, sendOwnerSticker, backfillStickerNotes, tick, account, loginStep, showWindow, state, dispose }
+  return { run, browse, watch, recentVideos, shareVideo, directDm, likeVideo, commentVideo, confirmOwner, checkOwnerDms, checkCommentReplies, checkMentions, checkWorkComments, listMentions, readInbox, readComments, replyToComment, myWorks, myComments, replyMyComment, cleanOutgoing, myStickers: () => site.myStickers(), pickSticker, collectSticker: (s) => site.collectSticker(s), describeSticker, sendOwnerSticker, backfillStickerNotes, tick, account, loginStep, showWindow, state, dispose }
 }

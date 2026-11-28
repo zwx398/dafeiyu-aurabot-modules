@@ -181,6 +181,43 @@ export default {
           }),
         }))
         tools.push(defineTool({
+          name: 'douyin_my_works',
+          description: '看她自己抖音主页上的作品（最新在前），带 awemeId、标题、链接、赞数、评论数。要读/回自己作品下面的评论时先用这个；不用等主人给链接。',
+          properties: { count: str('列几条，默认 6') },
+          execute: guarded('douyinBrowse', async ({ count }) => {
+            const r = await dy.myWorks({ count: Number(count) || 6 })
+            if (!r.ok) return r
+            const list = (r.works || []).map((w, i) => `${i + 1}. 《${w.title || '无标题'}》 ${w.url}（${w.comments} 评论 / ${w.likes} 赞） awemeId=${w.awemeId}`)
+            return { ok: true, message: `她自己（${r.nickname || '白饭鲸'}）最近的作品：\n` + (list.length ? list.join('\n') : '还没有作品'), works: r.works }
+          }),
+        }))
+        tools.push(defineTool({
+          name: 'douyin_my_comments',
+          description: '读她自己作品下面的评论（默认最新那条，带每条的 cid，方便接着回）。有人评论了她的作品、要她去回复时用。',
+          properties: {
+            awemeId: str('看哪条作品：不填=最新一条'),
+            count: str('读多少条，默认 20'),
+            replies: str('要不要连楼中楼一起读：默认要，填 false 就不要'),
+          },
+          execute: guarded('douyinBrowse', async ({ awemeId, count, replies }) => {
+            const r = await dy.myComments({ awemeId: String(awemeId || ''), count: Number(count) || 20, withReplies: String(replies || 'true').toLowerCase() !== 'false' })
+            if (!r.ok) return r
+            return { ok: true, message: formatCommentList(r), awemeId: r.awemeId }
+          }),
+        }))
+        tools.push(defineTool({
+          name: 'douyin_reply_comment',
+          description: '在她自己作品的某条评论下面回一句（楼中楼，默认不 @ 主人）。先用 douyin_my_comments 拿到 cid；回别人的子回复时把那条子回复所属的 parentCid 一起填上。文字直接是你嘴里的话，不要再带 [表情] 标记。',
+          properties: {
+            awemeId: str('哪条作品（douyin_my_works 里的 awemeId）'),
+            cid: str('回哪条评论：它的 cid'),
+            parentCid: str('可选：回的是别人的子回复时，填那条子回复所属的一级评论 cid'),
+            text: str('要回的话（100 字以内）'),
+          },
+          required: ['awemeId', 'cid', 'text'],
+          execute: guarded('douyinComment', async ({ awemeId, cid, parentCid, text }) => dy.replyMyComment({ awemeId: String(awemeId || ''), cid: String(cid || ''), parentCid: String(parentCid || ''), text: String(text || '') })),
+        }))
+        tools.push(defineTool({
           name: 'douyin_recent',
           description: '查最近刷过的抖音视频及真实链接。有人问刚才刷了什么、要分享或评论刚看过的视频时先用；没有记录就如实说。',
           properties: {},
@@ -268,6 +305,12 @@ export default {
     api.route('/douyin/confirm-owner', async (req) => {
       const b = await http.body(req).catch(() => ({}))
       return dy.confirmOwner(String(b?.input ?? api.config().douyin.owner.input ?? ''))
+    })
+    // 排查用：看看出站文字会被怎么清洗（QQ 标记 → 抖音能发的样子）
+    api.route('/douyin/clean', async (req) => {
+      const b = await http.body(req).catch(() => ({}))
+      const raw = String(b?.text ?? '')
+      return { ok: true, raw, clean: dy.cleanOutgoing(raw) }
     })
     return dy
   },

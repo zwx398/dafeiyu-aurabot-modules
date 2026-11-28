@@ -277,7 +277,7 @@ export function createSite({ browser, log }) {
    * 直接在别人的评论下面回复（楼中楼）：POST comment/publish，body 带 reply_id + reply_to_reply_id。
    * 不走 UI、不另发一条新评论。返回 { ok, cid }。
    */
-  async function replyComment(id, cid, text, { at } = {}) {
+  async function replyComment(id, cid, text, { at, replyId = '', replyToReplyId = '0' } = {}) {
     const want = String(cid || '')
     if (!/^[0-9]+$/.test(want)) throw new Error('要回复哪条评论？cid 不对')
     const say = String(text ?? '').trim()
@@ -295,10 +295,10 @@ export function createSite({ browser, log }) {
       aweme_id: String(id),
       text: body,
       text_extra: extra,
-      reply_id: want,
-      // 回复「一级评论」时 reply_to_reply_id 必须是 0；非 0 表示在回复某条子回复（抖音会按子回复处理，
-      // 子回复不存在时就落成顶层评论——之前「看着像另开一楼」就是这个原因）
-      reply_to_reply_id: '0',
+      // 回一级评论：reply_id = 她的 cid、reply_to_reply_id = 0；
+      // 回某条子回复：reply_id = 父评论 cid、reply_to_reply_id = 那条子回复的 cid
+      reply_id: String(replyId || want),
+      reply_to_reply_id: String(replyToReplyId || '0'),
       comment_type: '1',
       aweme_type: '0',
     }).toString()
