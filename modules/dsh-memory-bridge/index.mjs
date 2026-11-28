@@ -1,4 +1,4 @@
-﻿// DSH 记忆桥：把 DSH 客户端这边的对话，写进大肥鱼的同一条记忆里。
+// DSH 记忆桥：把 DSH 客户端这边的对话，写进大肥鱼的同一条记忆里。
 //
 // 为什么要有它：QQ 和抖音早就用 noteVia 写同一份私聊流水（同一个人、一套记忆），
 // 但 DSH 客户端这边的会话是独立存的，她读不到。这个模块读 DSH 的会话日志，
@@ -55,30 +55,40 @@ function entryOf(ev) {
 
 /**
  * 把会话文件解压成文本行。
- * 坑：DSH 宿主（Electron）的 zlib.zstdDecompressSync 只解第一帧，而会话文件是多次追加的多帧 zstd，
- * 解出来只有 session 头那一行。所以默认用外部 node（v24.22 能一次解完）跑一段小脚本；
- * 外部 node 不在时退回内置解压（可能只有一行，等于这个文件先跳过）。
+ * 坑：会话文件是多次追加的**多帧 zstd**，整体解压只能拿到第一帧（session 头那一行），
+ * 整个解会报 Unknown frame descriptor，流式解也只出一帧。
+ * 解法：按 zstd 魔数 28 B5 2F FD 切帧逐帧解，某帧解不开就把下一段并进来再试
+ * （防魔数偶然出现在压缩数据里）。不依赖外挂 node。
  */
-function readLines(file, nodePath) {
-  const script = `
-const fs=require('node:fs'),z=require('node:zlib')
-const b=z.zstdDecompressSync(fs.readFileSync(process.argv[1]))
-process.stdout.write(b)
-`
-  if (nodePath && fs.existsSync(nodePath)) {
-    const out = execFileSync(nodePath, ['-e', script, '--', file], { maxBuffer: 256 * 1024 * 1024 })
-    return out.toString('utf8').split(/\r?\n/).filter(Boolean)
+function readLines(file) {
+  let buf
+  try { buf = fs.readFileSync(file) } catch { return [] }
+  const starts = []
+  for (let i = 0; i + 4 <= buf.length; i++) {
+    if (buf[i] === 0x28 && buf[i + 1] === 0xb5 && buf[i + 2] === 0x2f && buf[i + 3] === 0xfd) starts.push(i)
   }
-  const buf = zlib.zstdDecompressSync(fs.readFileSync(file))
-  return buf.toString('utf8').split(/\r?\n/).filter(Boolean)
+  if (!starts.length) return []
+  const chunks = []
+  let i = 0
+  while (i < starts.length) {
+    let ok = null
+    for (let j = i + 1; j <= starts.length && !ok; j++) {
+      const end = j < starts.length ? starts[j] : buf.length
+      try { ok = { out: zlib.zstdDecompressSync(buf.subarray(starts[i], end)), next: j } } catch { /* 扩一段再试 */ }
+    }
+    if (!ok) break
+    chunks.push(ok.out)
+    i = ok.next
+  }
+  return Buffer.concat(chunks).toString('utf8').split(/\r?\n/).filter(Boolean)
 }
 
 export default {
   id: 'dsh-memory-bridge',
   name: 'DSH 记忆桥',
   api: 1,
-  version: '0.2.0',
-  description: '把 DSH 客户端里的对话写进同一份记忆（和 QQ、抖音共用一条鱼）',
+  version: '0.3.0',
+  description: '把 DSH 客户端里的对话写进同一份记忆；同时把最近几句当背景注入她的 QQ/抖音回合（长时记忆 + 工作记忆）',
   defaults: {
     enabled: true,
     dryRunMode: false,
@@ -89,12 +99,13 @@ export default {
     sessionsRoot: SESSIONS_ROOT,
     backfill: 20,
     backfillMaxAgeHours: 3,
+    inject: true,
   },
   settings: [
     { key: 'enabled', label: '启用', type: 'switch' },
     { key: 'dryRunMode', label: '干跑（只打日志不写记忆）', type: 'switch' },
+    { key: 'inject', label: '每轮把最近几句注入她的回合（工作记忆）', type: 'switch' },
     { key: 'intervalSec', label: '多久看一次（秒）', type: 'number', min: 30, max: 3600, step: 30 },
-    { key: 'nodePath', label: '解压用的 node.exe', type: 'text' },
     { key: 'maxChars', label: '每条最多留多少字', type: 'number', min: 80, max: 2000, step: 20 },
     { key: 'via', label: '记录来源名', type: 'text' },
     { key: 'backfill', label: '第一次看到会话时回填多少条（0 = 不回填）', type: 'number', min: 0, max: 200, step: 10 },
@@ -118,6 +129,40 @@ export default {
       } catch (e) {
         api.log.warn('存游标失败：', e?.message || e)
       }
+    }
+
+    // ---- 工作记忆：最近几句原文，每轮当背景注入她的回合（和上面的长时记忆是两件事） ----
+    const windowFile = () => path.join(api.dataDir(), 'window.json')
+    const loadWindow = () => { try { return JSON.parse(fs.readFileSync(windowFile(), 'utf8')) || { all: [] } } catch { return { all: [] } } }
+    const saveWindow = (w) => {
+      try {
+        fs.mkdirSync(path.dirname(windowFile()), { recursive: true })
+        fs.writeFileSync(windowFile(), JSON.stringify(w))
+      } catch (e) { api.log.warn('存工作记忆失败：', e?.message || e) }
+    }
+    function pushWindow(items) {
+      if (!items.length) return
+      const w = loadWindow()
+      const all = [...(Array.isArray(w.all) ? w.all : []), ...items].sort((a, b) => (a.at || 0) - (b.at || 0))
+      saveWindow({ all: all.slice(-400), updatedAt: Date.now() })
+    }
+    /** 拼给她看的那段背景：最近 8 条 + 主人更早说过的 5 句，总长 900 字封顶。 */
+    function buildInjection() {
+      const all = (loadWindow().all || []).filter((e) => e && e.at && Date.now() - e.at < 12 * 3600_000)
+      if (!all.length) return ''
+      const recent = all.slice(-8)
+      const earlier = all.slice(0, Math.max(0, all.length - recent.length)).filter((e) => e.who === 'user').slice(-5)
+      const clip90 = (t) => [...String(t || '').replace(/\s+/g, ' ').trim()].slice(0, 90).join('')
+      const lines = ['【背景：你刚才在 DSH 那边跟主人聊过下面这些。这段不是主人现在说的话，是你记得的事，别当成新消息回。】']
+      if (earlier.length) {
+        lines.push('主人早先说过：')
+        for (const e of earlier) lines.push('- ' + clip90(e.text))
+      }
+      lines.push('最近几句：')
+      for (const e of recent) lines.push(`${e.who === 'user' ? '主人' : '你'}：${clip90(e.text)}`)
+      let text = lines.join('\n')
+      if (text.length > 900) text = text.slice(0, 900) + '…'
+      return text
     }
 
     const listSessionFiles = () => {
@@ -162,13 +207,14 @@ export default {
       const maxChars = Number(cfg.maxChars) || 400
       let wrote = 0
       let skipped = 0
+      const collected = []
       let seen = new Set()
 
       for (const item of files) {
         const prev = state[item.file]
         let lines
         try {
-          lines = readLines(item.file, cfg.nodePath)
+          lines = readLines(item.file)
         } catch (e) {
           api.log.debug('读不了会话文件：', path.basename(path.dirname(item.file)), e?.message || e)
           continue
@@ -216,6 +262,7 @@ export default {
           if (seen.has(key)) continue
           seen.add(key)
           const clipped = text.length > maxChars ? `${text.slice(0, maxChars)}…` : text
+          collected.push({ who: ent.who, text: clipped, at: ent.at })
           if (cfg.dryRunMode) {
             api.log.info(`[干跑] ${ent.who === 'user' ? '主人' : '鱼'}：${clipped.slice(0, 70)}`)
             continue
@@ -230,6 +277,7 @@ export default {
         state[item.file] = { lines: lines.length, size: item.size, at: Date.now() }
       }
       saveState(state)
+      pushWindow(collected)
       if (cfg.dryRunMode) api.log.info(`[干跑] 这轮扫了 ${files.length} 个会话，跳过她自己的 ${skipped} 个`)
       else if (wrote) api.log.info(`把 ${wrote} 条 DSH 对话写进记忆`)
     }
@@ -251,6 +299,49 @@ export default {
         await tick()
         return api.settings().dryRunMode ? '扫完了，现在是干跑，只打日志没写记忆' : '扫完了，已经写进记忆'
       },
+    })
+
+    // 每轮把「最近几句」塞进她看到的内容里：只给主人私聊和抖音私信回合（群里不塞，省 token 也省隐私）
+    api.on('prompt', (content, info) => {
+      try {
+        if (!Array.isArray(content)) return content
+        if (!api.settings().inject) return content
+        const chat = info?.chat || {}
+        const ownerQQ = String(api.config()?.ownerQQ || '')
+        const isOwnerPrivate = chat.kind === 'private' && String(chat.userId || '') === ownerQQ
+        const isDouyinDm = chat.kind === 'system' && /^system:douyin-dm/.test(String(chat.chatId || ''))
+        if (!isOwnerPrivate && !isDouyinDm) return content
+        const text = buildInjection()
+        if (!text) return content
+        api.log.info(`注入工作记忆 ${text.length} 字（${isDouyinDm ? '抖音私信' : 'QQ 私聊'}）`)
+        return [{ type: 'text', text }, ...content]
+      } catch (e) {
+        api.log.warn('注入工作记忆失败：', e?.message || e)
+        return content
+      }
+    })
+
+    api.route('/window', async () => ({ ok: true, text: buildInjection(), total: (loadWindow().all || []).length }))
+    api.route('/tick', async () => { await tick(); return { ok: true, total: (loadWindow().all || []).length } })
+    api.route('/window/clear', async () => { saveWindow({ all: [] }); return { ok: true } })
+    // 一次性把最近几个会话的尾巴灌进工作记忆（刚合并过来、或者想立刻有上下文时用）
+    api.route('/window/backfill', async (req) => {
+      const n = Math.max(4, Math.min(80, Number((await api.core.http.body(req).catch(() => ({})))?.n) || 30))
+      const files = listSessionFiles().slice(-3)
+      const got = []
+      for (const item of files) {
+        const lines = readLines(item.file)
+        const cwd = (() => { try { return JSON.parse(lines[0] || '{}').cwd || '' } catch { return '' } })()
+        if (BOT_WORKSPACE.test(item.file) || /aurobot|qq-chats/i.test(item.file) || /qq-chats/i.test(cwd)) continue
+        const ents = []
+        for (const raw of lines) {
+          try { const e = entryOf(JSON.parse(raw)); if (e && !isNoise(e.text)) ents.push(e) } catch { /* 半行 */ }
+        }
+        got.push(...ents.slice(-n))
+      }
+      got.sort((a, b) => a.at - b.at)
+      pushWindow(got.map((e) => ({ who: e.who, text: e.text.replace(/\s+/g, ' ').trim().slice(0, 400), at: e.at })))
+      return { ok: true, added: got.length, total: (loadWindow().all || []).length }
     })
 
     api.log.info(`已启动（${api.settings().dryRunMode ? '干跑' : '正式写'}，每 ${api.settings().intervalSec} 秒看一次）`)
