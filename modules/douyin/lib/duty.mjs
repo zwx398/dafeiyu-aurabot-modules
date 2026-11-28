@@ -926,11 +926,8 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
           for (const ic of imageComments) {
             ic.desc = await describeSticker(ic.url)
           }
-          // L2：看画面（视频抽帧 / 图文抓图），看不成也不影响标题文案
-          let seen = ''
-          try { seen = v.isImages ? await describeNoteImages(v.images) : await describeVideo(v.awemeId) } catch (error) { log.debug('看画面失败：', error.message) }
           await site.watch(v.awemeId, between(c.dwellMin, c.dwellMax) * 1000)
-          looked.push({ v, comments, stickers, imageComments, seen })
+          looked.push({ v, comments, stickers, imageComments })
           s.watched++
           s.seen = [...s.seen.filter((x) => x !== v.awemeId), v.awemeId].slice(-500)
         } catch (error) {
@@ -940,6 +937,23 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
         save(s)
       }
       if (!looked.length) { s.lastSkipReason = '视频都没打开'; return { ok: false, message: s.lastSkipReason } }
+
+      // 挑着深看：先 L1 快扫完（标题文案摘要），让鱼挑出想真看画面的，再只对挑中的抽帧看图（L2）。
+      // 每轮最多深看 2 个，省时间也省 token；没挑中就不抽帧，画面那一栏留空。
+      const DEEP_MAX = 2
+      let deepPicks = []
+      try {
+        const pickOut = await think(`你在抖音快扫到了这几个视频（只看过标题、文案、摘要和热评，还没看画面）：\n\n${looked.map((x, i) => `【${i + 1}】${digestOf(x.v, x.comments)}`).join('\n\n')}\n\n挑出你想真看画面（抽帧看图）的视频，最多 ${DEEP_MAX} 个。只输出 JSON 数组，元素是序号数字，例如 [1,3]；一个都不想深看就输出 []。`)
+        deepPicks = (pickJson(pickOut, []) || []).map((d) => Number(d?.i ?? d)).filter((n) => Number.isInteger(n) && n >= 1 && n <= looked.length).slice(0, DEEP_MAX)
+      } catch (error) {
+        log.warn('挑深看的模型没回，退回深看前 2 个：', error.message)
+        deepPicks = [1, 2].slice(0, Math.min(DEEP_MAX, looked.length))
+      }
+      for (const idx of deepPicks) {
+        const x = looked[idx - 1]
+        if (!x) continue
+        try { x.seen = x.v.isImages ? await describeNoteImages(x.v.images) : await describeVideo(x.v.awemeId) } catch (error) { log.debug('看画面失败：', error.message) }
+      }
 
       const canWrite = !paused(s)
       const g = getConfig()
