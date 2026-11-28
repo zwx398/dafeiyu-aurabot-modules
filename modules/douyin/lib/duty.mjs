@@ -1176,6 +1176,30 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     return new Set((stickerCache || []).map((s) => s.id))
   }
 
+  // ---------- 看图模型：自动挑一个支持图片的 ----------
+  // 不写死 deepseek-flash：先用 modelVision 查「能不能看图」（读 DSH 的 inputModalities），
+  // 选中的缓存 30 天才重查一次（模型更新没那么快）；查不了就退回默认候选 flash。
+  let visionModel = null // { provider, model }
+  let visionModelAt = 0
+  const VISION_MODEL_TTL = 30 * 24 * 3600_000
+  const VISION_MODEL_CANDS = [
+    { provider: 'deepseek-account', model: 'deepseek-flash' },
+  ]
+  async function pickVisionModel() {
+    if (visionModel && now() - visionModelAt < VISION_MODEL_TTL) return visionModel
+    let modelVision = null
+    try { modelVision = __lib('core/llm.js').modelVision } catch (error) { log.debug('拿不到 modelVision：', error.message) }
+    for (const c of VISION_MODEL_CANDS) {
+      if (!modelVision) { visionModel = c; visionModelAt = now(); return c }
+      try {
+        const v = await modelVision(dsh, c.provider, c.model)
+        if (v === true) { visionModel = c; visionModelAt = now(); log.info(`看图模型：${c.provider}/${c.model}`); return c }
+        log.info(`看图模型：${c.provider}/${c.model} 不支持图片（vision=${String(v)}），跳过`)
+      } catch (error) { log.debug(`查 ${c.provider}/${c.model} 看图能力失败：`, error.message) }
+    }
+    return null
+  }
+
   /**
    * 看一张表情图画的是什么（一句话），用来理解带表情的评论。
    * 取图 = 页面上把那个表情截下来（data URL）；看 = 交给 DSH 的模型（deepseek-flash 能收图）。
@@ -1201,7 +1225,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
         text: '这是网友在抖音评论区发的一张图（表情包 / 图片评论）。用两三句话说清：画的是什么、什么情绪；图里如果有文字（字幕、聊天记录、截图上的字），原样读出来。只在有字的时候才提文字，别硬编。',
         images: [{ data: img.data, mediaType: img.mediaType }],
         cfg: getConfig(),
-        model: { provider: 'deepseek-account', model: 'deepseek-flash' },
+        model: await pickVisionModel(),
         maxTokens: 200,
         temperature: 0.2,
       })
@@ -1232,7 +1256,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
         text: '这是抖音视频的几帧画面（从左到右按时间顺序拼在一起）。用两三句话说清：这个视频在讲什么、画面里有什么（人、场景、动作）；如果画面里有字幕或文字，原样读出来。只在有字的时候才提文字，别硬编。',
         images: [{ data, mediaType }],
         cfg: getConfig(),
-        model: { provider: 'deepseek-account', model: 'deepseek-flash' },
+        model: await pickVisionModel(),
         maxTokens: 300,
         temperature: 0.2,
       })
@@ -1261,7 +1285,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
         text: '这是抖音图文作品的几张图。用两三句话说清：图里是什么内容；图里有文字（标题、字幕、聊天记录）就原样读出来。只在有字的时候才提文字，别硬编。',
         images: imgs,
         cfg: getConfig(),
-        model: { provider: 'deepseek-account', model: 'deepseek-flash' },
+        model: await pickVisionModel(),
         maxTokens: 300,
         temperature: 0.2,
       })
