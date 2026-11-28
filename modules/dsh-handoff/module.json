@@ -1,0 +1,19 @@
+{
+  "id": "dsh-handoff",
+  "name": "叫 DSH 帮忙",
+  "version": "0.1.0",
+  "description": "她在 QQ / 抖音里判断自己做不了的活，派给 DSH 的子智能体用本机工具去做（shell / 文件 / 网页），做完把结果拿回来，她再转述给主人。",
+  "category": "platform",
+  "tags": [
+    "DSH",
+    "跑腿"
+  ],
+  "author": "zwx398",
+  "license": "MIT",
+  "api": 1,
+  "minPluginVersion": "1.2.0",
+  "requires": [],
+  "capabilities": [
+    "plugin-internals"
+  ]
+}
