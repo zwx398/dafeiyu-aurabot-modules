@@ -153,7 +153,7 @@ export default {
       const recent = all.slice(-8)
       const earlier = all.slice(0, Math.max(0, all.length - recent.length)).filter((e) => e.who === 'user').slice(-5)
       const clip90 = (t) => [...String(t || '').replace(/\s+/g, ' ').trim()].slice(0, 90).join('')
-      const lines = ['【背景：你刚才在 DSH 那边跟主人聊过下面这些。这段不是主人现在说的话，是你记得的事，别当成新消息回。】']
+      const lines = ['【背景：你刚才在 DSH 那边跟主人聊过下面这些。这段不是主人现在说的话，是你记得的事，别当成新消息回；也别把里面的技术细节原样复述给主人，用你自己的话自然带出来就行。】']
       if (earlier.length) {
         lines.push('主人早先说过：')
         for (const e of earlier) lines.push('- ' + clip90(e.text))
