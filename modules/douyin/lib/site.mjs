@@ -76,6 +76,11 @@ export function normalizeAweme(raw) {
     chapters: (a.chapter_list || []).map((c) => clean([c.desc, c.detail].filter(Boolean).join('：'), 120)).filter(Boolean).slice(0, 8),
     music: a.music?.title ? clean(`${a.music.title}${a.music.author ? ' - ' + a.music.author : ''}`, 60) : '',
     isImages: Array.isArray(a.images) && a.images.length > 0,
+    images: (a.images || []).map((im) => ({
+      url: (im.url_list || im.origin_url?.url_list || [])[0] || '',
+      w: num(im.width || im.origin_url?.width),
+      h: num(im.height || im.origin_url?.height),
+    })).filter((x) => x.url).slice(0, 6),
     createdAt: num(a.create_time) * 1000,
   }
 }
@@ -443,6 +448,57 @@ export function createSite({ browser, log }) {
     await openVideo(id)
     await b.evaluate(`document.querySelectorAll(${JSON.stringify(scope(id) + ' video')}).forEach((v) => { v.muted = true; v.play && v.play().catch(() => {}) })`).catch(() => {})
     await sleep(ms)
+  }
+
+  /**
+   * 抽一个视频的几帧画面，拼成一张网格图（jpeg data URL），给模型「看画面」用。
+   * 弹层播放器里 seek 到不同时间点，canvas 从 video 取帧拼图；视频在屏幕外也能取到解码帧。
+   * 抽不到（没 video / 取帧失败）返回 ''，调用方按「没画面」降级，不拦主流程。
+   */
+  async function grabFrames(id, { count = 3, width = 270 } = {}) {
+    await openVideo(id)
+    const sel = `${scope(id)} video`
+    const data = await b.evaluate(`(async () => {
+      const v = document.querySelector(${JSON.stringify(sel)})
+      if (!v) return ''
+      v.muted = true
+      try { v.play && v.play().catch(() => {}) } catch (e) {}
+      for (let i = 0; i < 30 && v.readyState < 2; i++) await new Promise((r) => setTimeout(r, 300))
+      if (v.readyState < 2) return ''
+      const dur = v.duration || 0
+      const n = Math.max(1, Math.min(6, Number(${count}) || 3))
+      // 时间点：跳过片头片尾，中间均分
+      const times = dur > 0
+        ? Array.from({ length: n }, (_, i) => Math.min(dur - 0.3, Math.max(0.3, dur * (0.15 + 0.7 * i / Math.max(1, n - 1)))))
+        : [0]
+      const vw = v.videoWidth || 720
+      const vh = v.videoHeight || 1280
+      const cw = Number(${width}) || 270
+      const ch = Math.max(1, Math.round(cw * vh / vw))
+      const cols = n <= 3 ? n : 3
+      const rows = Math.ceil(n / cols)
+      const canvas = document.createElement('canvas')
+      canvas.width = cw * cols
+      canvas.height = ch * rows
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#000'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      const seek = (t) => new Promise((res) => {
+        const done = () => { v.removeEventListener('seeked', done); res() }
+        v.addEventListener('seeked', done)
+        try { v.currentTime = t } catch (e) { res() }
+        setTimeout(() => { v.removeEventListener('seeked', done); res() }, 4000)
+      })
+      for (let i = 0; i < n; i++) {
+        await seek(times[i])
+        await new Promise((r) => setTimeout(r, 200))
+        const x = (i % cols) * cw
+        const y = Math.floor(i / cols) * ch
+        try { ctx.drawImage(v, x, y, cw, ch) } catch (e) {}
+      }
+      try { return canvas.toDataURL('image/jpeg', 0.72) } catch (e) { return '' }
+    })()`).catch(() => '')
+    return typeof data === 'string' ? data : ''
   }
 
   /** 点赞：已经赞过就不点（再点会变成取消）；点完等接口确认。 */
@@ -1220,5 +1276,5 @@ export function createSite({ browser, log }) {
     return { ok: true, loggedIn: false, shot: await loginShot() }
   }
 
-  return { ensure, self, user, profileOf, findByDouyinId, feed, detail, comments, commentsRaw, userPosts, searchVideo, replies, commentById, replyComment, readMentions, verify, watch, like, comment, commentSticker, myStickers, collectSticker, stickerImage, openComments, imageData, dmImage, dmSticker, lastMyStickerImage, stickerUrlBySid, share, dms, dm, sendDm, screenshot: () => b.screenshot().catch(() => ''), loginStart, loginPoll, show: (v) => b.show(v), connected: () => b.connected() }
+  return { ensure, self, user, profileOf, findByDouyinId, feed, detail, comments, commentsRaw, userPosts, searchVideo, replies, commentById, replyComment, readMentions, verify, watch, grabFrames, like, comment, commentSticker, myStickers, collectSticker, stickerImage, openComments, imageData, dmImage, dmSticker, lastMyStickerImage, stickerUrlBySid, share, dms, dm, sendDm, screenshot: () => b.screenshot().catch(() => ''), loginStart, loginPoll, show: (v) => b.show(v), connected: () => b.connected() }
 }

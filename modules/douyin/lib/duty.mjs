@@ -1,4 +1,4 @@
-﻿const __lib = globalThis.aurabot.lib // 插件内部源码（复制出来后靠它找到插件里的文件）
+const __lib = globalThis.aurabot.lib // 插件内部源码（复制出来后靠它找到插件里的文件）
 // 刷抖音：定时打开推荐，一个个点开看（真的播放、停留），读标题、分类、抖音给的内容摘要和热评，
 // 再按她的人格决定点不点赞、评不评论、要不要分享给主人（抖音私信 / QQ）、记住什么。别人发来抖音链接，她也能点开看完再聊。
 // 点赞 / 评论都按视频 id 在弹层播放器里点，点完等抖音的接口回应才算成功；遇到验证码当天就停手。
@@ -900,6 +900,13 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       const looked = []
       for (const v of list) {
         try {
+          // L1：feed 流里没有官方摘要/章节，detail 才有（也不是每个视频都有，有就补上）
+          const full = await site.detail(v.awemeId).catch(() => null)
+          if (full) {
+            if (!v.summary) v.summary = full.summary
+            if (!v.chapters?.length) v.chapters = full.chapters
+            if (full.images?.length) { v.images = full.images; v.isImages = true }
+          }
           const comments = await site.comments(v.awemeId).catch(() => [])
           // 评论区里别人发的表情：只留没收藏过的、每条视频最多 3 个，别把提示塞爆
           const rawc = await site.commentsRaw(v.awemeId, { count: 20 }).catch(() => [])
@@ -919,8 +926,11 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
           for (const ic of imageComments) {
             ic.desc = await describeSticker(ic.url)
           }
+          // L2：看画面（视频抽帧 / 图文抓图），看不成也不影响标题文案
+          let seen = ''
+          try { seen = v.isImages ? await describeNoteImages(v.images) : await describeVideo(v.awemeId) } catch (error) { log.debug('看画面失败：', error.message) }
           await site.watch(v.awemeId, between(c.dwellMin, c.dwellMax) * 1000)
-          looked.push({ v, comments, stickers, imageComments })
+          looked.push({ v, comments, stickers, imageComments, seen })
           s.watched++
           s.seen = [...s.seen.filter((x) => x !== v.awemeId), v.awemeId].slice(-500)
         } catch (error) {
@@ -943,6 +953,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       let out = ''
       try {
         out = await think(`你在抖音刷到了这几个视频：\n\n${looked.map((x, i) => `【${i + 1}】${digestOf(x.v, x.comments)}` +
+          (x.seen ? `\n画面：${x.seen}` : '') +
           (x.stickers?.length ? `\n（这条视频的评论区里别人发的表情：\n${x.stickers.map((st, k) => `  ${k + 1}) ${st.nick}${st.text ? '：' + st.text.slice(0, 20) : ''}${st.desc ? `（图里是${st.desc}）` : ''}`).join('\n')}\n）` : '') +
           (x.imageComments?.length ? `\n（评论区里别人发的图片评论：\n${x.imageComments.map((ic, k) => `  ${k + 1}) ${ic.nick}${ic.text ? '：' + ic.text : ''}${ic.desc ? `（图里是${ic.desc}）` : ''}`).join('\n')}\n）` : '')).join('\n\n')}\n\n` +
         `看完说说你的想法。对每个视频给一个对象：{"i":序号, "feeling":"一句你的真实感受", "like":true/false, "comment":"想在视频下发的评论（像普通观众，一两句、别打广告，不想评就空字符串）", ${atLeft ? '"at":true/false, ' : ''}"share":"想分享给${owner()}时说的话（不想分享就空字符串）", "collect":[想收藏的表情序号], "remember":"值得记住的一件事（没有就空字符串）"}。` +
@@ -1110,9 +1121,13 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       const r = await ready(s)
       if (!r.ok) return r
       const [v, comments] = await Promise.all([site.detail(id), site.comments(id).catch(() => [])])
-      memory?.addEvent?.({ text: `看了别人发来的抖音视频《${v.title}》`, tags: ['抖音'], importance: 0.4 })
+      // L2：看画面（视频抽帧 / 图文抓图），看不成不影响标题文案
+      let seen = ''
+      try { seen = v.isImages ? await describeNoteImages(v.images) : await describeVideo(id) } catch (error) { log.debug('看画面失败：', error.message) }
+      memory?.addEvent?.({ text: `看了别人发来的抖音${v.isImages ? '图文' : '视频'}《${v.title}》${seen ? `（画面：${seen.slice(0, 40)}）` : ''}`, tags: ['抖音'], importance: 0.4 })
       record(s, { kind: 'look', awemeId: id, title: v.title, author: v.author })
-      return { ok: true, message: digestOf(v, comments), awemeId: id, title: v.title }
+      const extra = seen ? `\n画面：${seen}` : ''
+      return { ok: true, message: digestOf(v, comments) + extra, awemeId: id, title: v.title }
     } catch (error) {
       return { ok: false, message: '这个视频没打开：' + error.message }
     } finally {
@@ -1172,6 +1187,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
         text: '这是网友在抖音评论区发的一张图（表情包 / 图片评论）。用两三句话说清：画的是什么、什么情绪；图里如果有文字（字幕、聊天记录、截图上的字），原样读出来。只在有字的时候才提文字，别硬编。',
         images: [{ data: img.data, mediaType: img.mediaType }],
         cfg: getConfig(),
+        model: { provider: 'deepseek-account', model: 'deepseek-flash' },
         maxTokens: 200,
         temperature: 0.2,
       })
@@ -1179,6 +1195,66 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       return String(out || '').replace(/\s+/g, ' ').trim().slice(0, 120)
     } catch (error) {
       log.info('看图：模型调用失败 ' + error.message)
+      return ''
+    }
+  }
+
+  /**
+   * 看一个视频的画面（L2）：抽几帧拼成图，交给模型说清画面里是什么 + 读字幕。
+   * 失败返回 ''，不影响主流程（刷流时「没看到画面」照样能按标题文案决定）。
+   */
+  async function describeVideo(id, { frames = 3 } = {}) {
+    if (!dsh) return ''
+    let askModel = null
+    try { askModel = __lib('core/llm.js').askModel } catch (error) { log.debug('拿不到 askModel：', error.message) }
+    if (!askModel) return ''
+    const dataUrl = await site.grabFrames(id, { count: frames }).catch(() => '')
+    if (!String(dataUrl).startsWith('data:image/')) return ''
+    const mediaType = String(dataUrl).slice(5, String(dataUrl).indexOf(';')) || 'image/jpeg'
+    const data = String(dataUrl).slice(String(dataUrl).indexOf(',') + 1)
+    if (!data) return ''
+    try {
+      const out = await askModel(dsh, {
+        text: '这是抖音视频的几帧画面（从左到右按时间顺序拼在一起）。用两三句话说清：这个视频在讲什么、画面里有什么（人、场景、动作）；如果画面里有字幕或文字，原样读出来。只在有字的时候才提文字，别硬编。',
+        images: [{ data, mediaType }],
+        cfg: getConfig(),
+        model: { provider: 'deepseek-account', model: 'deepseek-flash' },
+        maxTokens: 300,
+        temperature: 0.2,
+      })
+      log.info(`看视频画面：${String(out || '').replace(/\s+/g, ' ').slice(0, 80)}`)
+      return String(out || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    } catch (error) {
+      log.info('看视频画面：模型调用失败 ' + error.message)
+      return ''
+    }
+  }
+
+  /** 看一条图文作品的画面（L2）：下载前几张图，交给模型说清图里内容。 */
+  async function describeNoteImages(images) {
+    if (!dsh || !Array.isArray(images) || !images.length) return ''
+    let askModel = null
+    try { askModel = __lib('core/llm.js').askModel } catch (error) { log.debug('拿不到 askModel：', error.message) }
+    if (!askModel) return ''
+    const imgs = []
+    for (const im of images.slice(0, 2)) {
+      const d = await site.imageData(im.url).catch(() => null)
+      if (d?.data) imgs.push({ data: d.data, mediaType: d.mediaType })
+    }
+    if (!imgs.length) return ''
+    try {
+      const out = await askModel(dsh, {
+        text: '这是抖音图文作品的几张图。用两三句话说清：图里是什么内容；图里有文字（标题、字幕、聊天记录）就原样读出来。只在有字的时候才提文字，别硬编。',
+        images: imgs,
+        cfg: getConfig(),
+        model: { provider: 'deepseek-account', model: 'deepseek-flash' },
+        maxTokens: 300,
+        temperature: 0.2,
+      })
+      log.info(`看图文画面：${String(out || '').replace(/\s+/g, ' ').slice(0, 80)}`)
+      return String(out || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    } catch (error) {
+      log.info('看图文画面：模型调用失败 ' + error.message)
       return ''
     }
   }
@@ -1706,5 +1782,5 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     } finally { busy = false }
   }
 
-  return { run, browse, watch, recentVideos, shareVideo, directDm, likeVideo, commentVideo, confirmOwner, checkOwnerDms, checkCommentReplies, checkMentions, checkWorkComments, listMentions, readInbox, readComments, replyToComment, myWorks, myComments, replyMyComment, cleanOutgoing, sayOwnerDm, myStickers: () => site.myStickers(), pickSticker, collectSticker: (s) => site.collectSticker(s), describeSticker, sendOwnerSticker, backfillStickerNotes, tick, account, loginStep, showWindow, state, dispose }
+  return { run, browse, watch, recentVideos, shareVideo, directDm, likeVideo, commentVideo, confirmOwner, checkOwnerDms, checkCommentReplies, checkMentions, checkWorkComments, listMentions, readInbox, readComments, replyToComment, myWorks, myComments, replyMyComment, cleanOutgoing, sayOwnerDm, myStickers: () => site.myStickers(), pickSticker, collectSticker: (s) => site.collectSticker(s), describeSticker, describeVideo, describeNoteImages, sendOwnerSticker, backfillStickerNotes, tick, account, loginStep, showWindow, state, dispose }
 }

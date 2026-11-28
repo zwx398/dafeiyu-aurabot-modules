@@ -302,6 +302,13 @@ export default {
       const text = await dy.describeSticker(String(b?.url || b?.uri || ''))
       return { ok: !!text, text }
     })
+    // 试：看一个视频 / 图文的内容（body { link }；走 L1 摘要 + L2 抽帧看画面，跟 douyin_watch 同一条链路）
+    api.route('/douyin/see', async (req) => {
+      const b = await http.body(req).catch(() => ({}))
+      const link = String(b?.link || b?.id || '').trim()
+      if (!link) return { ok: false, message: '要给 link 或 id' }
+      try { return await dy.watch(link) } catch (error) { return { ok: false, message: error.message } }
+    })
     api.route('/douyin/confirm-owner', async (req) => {
       const b = await http.body(req).catch(() => ({}))
       return dy.confirmOwner(String(b?.input ?? api.config().douyin.owner.input ?? ''))
