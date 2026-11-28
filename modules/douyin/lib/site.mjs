@@ -775,10 +775,18 @@ export function createSite({ browser, log }) {
     for (let tries = 0; ; tries++) {
       await b.clearFocused()
       await b.type(text)
-      await sleep(400 + Math.random() * 600)
+      // 长句要给它打字的时间（之前 400~1000ms 对 200 字以上不够，会出现「字对不上」）
+      await sleep(400 + Math.min(3000, String(text).length * 8) + Math.random() * 600)
       const typed = await inBox()
       if (dmEqual(typed, text)) break
-      if (tries >= 1) { await b.clearFocused().catch(() => {}); throw new Error('私信输入框里的字对不上，没发') }
+      if (tries >= 2) {
+        await b.clearFocused().catch(() => {})
+        const a = dmComparable(typed)
+        const w = dmComparable(text)
+        let diffAt = 0
+        while (diffAt < Math.min(a.length, w.length) && a[diffAt] === w[diffAt]) diffAt++
+        throw new Error(`私信输入框里的字对不上，没发（框里 ${a.length} 字 / 想发 ${w.length} 字，第 ${diffAt + 1} 个字开始不一样）`)
+      }
     }
     const startedAt = Date.now()
     const sent = /\/v1\/message\/send/
