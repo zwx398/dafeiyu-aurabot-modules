@@ -45,7 +45,7 @@ const stripMention = (text, mention) => {
 }
 // 这些错误说明今天别再动手了：验证码、操作太频繁、账号被限制
 const STOP_RE = /验证|频繁|稍后再试|异常|限制|风控/
-const NAME = { like: '点赞', comment: '评论' }
+const NAME = { like: '点赞', comment: '评论', reply: '回复自己作品下的评论' }
 const LOGIN_GRACE_MS = 5 * 60_000
 
 // Public comments can reuse private context, so enforce the privacy check at the write boundary.
@@ -83,7 +83,9 @@ export function pickJson(out, fallback) {
   try { return JSON.parse(m[0]) } catch (error) { return fallback }
 }
 
-const emptyDay = () => ({ day: '', runs: 0, watched: 0, like: 0, comment: 0, share: 0, atOwner: 0, writes: 0 })
+const emptyDay = () => ({ day: '', runs: 0, watched: 0, like: 0, comment: 0, reply: 0, share: 0, atOwner: 0, writes: 0 })
+// 回自己作品下的评论单独一份额度（不占「给别人的评论」那 4 条）：自己的评论区风险低，多给一点
+const REPLY_PER_DAY = 10
 const emptyState = () => ({
   ...emptyDay(),
   lastRun: 0, nextDueAt: 0, lastSkipReason: '', lastWriteAt: 0, refreshIndex: 1,
@@ -174,7 +176,10 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     const days = cfg().gate.newAccountDays
     return Boolean(days && s.loginAt && now() - s.loginAt < days * 86400_000)
   }
-  const capOf = (s, kind) => (isNew(s) ? Math.floor(cfg().caps[kind] / 2) : cfg().caps[kind])
+  const capOf = (s, kind) => {
+    const base = kind === 'reply' ? REPLY_PER_DAY : cfg().caps[kind]
+    return isNew(s) ? Math.floor(base / 2) : base
+  }
   const left = (s, kind) => Math.max(0, capOf(s, kind) - (s[kind] || 0))
   const writesLeft = (s) => Math.max(0, (isNew(s) ? Math.floor(cfg().gate.maxWritesPerDay / 2) : cfg().gate.maxWritesPerDay) - s.writes)
 
@@ -210,7 +215,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
 
   /** 做一次写操作（点赞 / 评论）。试运行只记日志不占次数；出错是验证码 / 风控就停一天。刷流里间隔不够就等够再做。 */
   async function doWrite(s, kind, meta, act, { waitGap = false, originalComment = '' } = {}) {
-    if (kind === 'comment') {
+    if (kind === 'comment' || kind === 'reply') {
       const category = commentPrivacyCategory(originalComment) || commentPrivacyCategory(meta.text)
       if (category) {
         log.info('已拦截抖音公开评论：', category)
@@ -704,7 +709,7 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
       const parent = String(parentCid || '').trim()
       const w = await doWrite(
         s,
-        'comment',
+        'reply',
         { awemeId: id, text: say },
         () => site.replyComment(id, want, say, parent ? { at: atInfo, replyId: parent, replyToReplyId: want } : { at: atInfo }),
         { waitGap: true },
@@ -1598,9 +1603,9 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     const s = load()
     const c = cfg()
     return {
-      runs: s.runs, watched: s.watched, like: s.like, comment: s.comment, share: s.share, writes: s.writes,
+      runs: s.runs, watched: s.watched, like: s.like, comment: s.comment, reply: s.reply, share: s.share, writes: s.writes,
       atOwner: s.atOwner, owner: ownerDy() ? { nickname: ownerDy().nickname } : null,
-      caps: { like: capOf(s, 'like'), comment: capOf(s, 'comment'), share: capOf(s, 'share'), atOwner: capOf(s, 'atOwner'), writes: isNew(s) ? Math.floor(c.gate.maxWritesPerDay / 2) : c.gate.maxWritesPerDay },
+      caps: { like: capOf(s, 'like'), comment: capOf(s, 'comment'), reply: capOf(s, 'reply'), share: capOf(s, 'share'), atOwner: capOf(s, 'atOwner'), writes: isNew(s) ? Math.floor(c.gate.maxWritesPerDay / 2) : c.gate.maxWritesPerDay },
       newAccount: isNew(s), lastRun: s.lastRun, nextDueAt: s.nextDueAt, lastSkipReason: s.lastSkipReason,
       pauseReason: paused(s) ? s.pauseReason : '', account: s.account, busy, browserOpen: site.connected(),
       history: s.history.slice(0, 30),
