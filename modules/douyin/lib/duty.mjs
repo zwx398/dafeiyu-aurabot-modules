@@ -1,4 +1,4 @@
-const __lib = globalThis.aurabot.lib // 插件内部源码（复制出来后靠它找到插件里的文件）
+﻿const __lib = globalThis.aurabot.lib // 插件内部源码（复制出来后靠它找到插件里的文件）
 // 刷抖音：定时打开推荐，一个个点开看（真的播放、停留），读标题、分类、抖音给的内容摘要和热评，
 // 再按她的人格决定点不点赞、评不评论、要不要分享给主人（抖音私信 / QQ）、记住什么。别人发来抖音链接，她也能点开看完再聊。
 // 点赞 / 评论都按视频 id 在弹层播放器里点，点完等抖音的接口回应才算成功；遇到验证码当天就停手。
@@ -1482,6 +1482,31 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     }
   }
 
+  /** 排查用：直接往和主人的抖音私信里发一句（不经过模型）。 */
+  async function sayOwnerDm(text) {
+    const o = ownerDy()
+    if (!o?.uid) return { ok: false, message: '还没核对主人的抖音号' }
+    if (busy) return { ok: false, message: '正在刷抖音，等会儿再发' }
+    const say = clip(cleanOutgoing(String(text || '')), 300)
+    if (!say) return { ok: false, message: '要发什么是空的' }
+    busy = true
+    const s = load()
+    try {
+      const r = await ready(s, '主人要求')
+      if (!r.ok) return r
+      await site.dms(o.uid)
+      await site.sendDm(say)
+      record(s, { kind: 'dm', text: say })
+      save(s)
+      return { ok: true, message: `发了 ${say.length} 字` }
+    } catch (error) {
+      return { ok: false, message: error.message }
+    } finally {
+      busy = false
+      save(s)
+    }
+  }
+
   /** 在抖音私信里跟主人照实说一句（系统消息交给她，用她的口气说）。 */
   async function tellOwnerDm(note) {
     const o = ownerDy()
@@ -1681,5 +1706,5 @@ export function createDouyin({ getConfig, getSettings, setOwner, hub, memory, lo
     } finally { busy = false }
   }
 
-  return { run, browse, watch, recentVideos, shareVideo, directDm, likeVideo, commentVideo, confirmOwner, checkOwnerDms, checkCommentReplies, checkMentions, checkWorkComments, listMentions, readInbox, readComments, replyToComment, myWorks, myComments, replyMyComment, cleanOutgoing, myStickers: () => site.myStickers(), pickSticker, collectSticker: (s) => site.collectSticker(s), describeSticker, sendOwnerSticker, backfillStickerNotes, tick, account, loginStep, showWindow, state, dispose }
+  return { run, browse, watch, recentVideos, shareVideo, directDm, likeVideo, commentVideo, confirmOwner, checkOwnerDms, checkCommentReplies, checkMentions, checkWorkComments, listMentions, readInbox, readComments, replyToComment, myWorks, myComments, replyMyComment, cleanOutgoing, sayOwnerDm, myStickers: () => site.myStickers(), pickSticker, collectSticker: (s) => site.collectSticker(s), describeSticker, sendOwnerSticker, backfillStickerNotes, tick, account, loginStep, showWindow, state, dispose }
 }

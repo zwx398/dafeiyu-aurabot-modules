@@ -306,6 +306,18 @@ export default {
       const b = await http.body(req).catch(() => ({}))
       return dy.confirmOwner(String(b?.input ?? api.config().douyin.owner.input ?? ''))
     })
+    // 排查用：直接往抖音私信里发一句（测通道/测长句打字），body { text }
+    api.route('/douyin/say', async (req) => {
+      const b = await http.body(req).catch(() => ({}))
+      const text = String(b?.text || '').trim()
+      if (!text) return { ok: false, message: 'text 要给我' }
+      try {
+        const r = await dy.sayOwnerDm(text)
+        return { ok: Boolean(r?.ok), ...r }
+      } catch (error) {
+        return { ok: false, message: error.message }
+      }
+    })
     // 排查用：看看出站文字会被怎么清洗（QQ 标记 → 抖音能发的样子）
     api.route('/douyin/clean', async (req) => {
       const b = await http.body(req).catch(() => ({}))
